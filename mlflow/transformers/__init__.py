@@ -932,14 +932,29 @@ def _load_model(path: str, flavor_config, return_type: str, device=None, **kwarg
     """
     import transformers
 
-    model_instance = getattr(transformers, flavor_config[_PIPELINE_MODEL_TYPE_KEY])
     local_path = pathlib.Path(path)
+
     # NB: Path resolution for models that were saved prior to 2.4.1 release when the pathing for
     #     the saved pipeline or component artifacts was handled by duplicate entries for components
     #     (artifacts/pipeline/* and artifacts/components/*) and pipelines were saved via the
     #     "artifacts/pipeline/*" path. In order to load the older formats after the change, the
     #     presence of the new path key is checked.
     model_path = local_path.joinpath(flavor_config.get(_MODEL_BINARY_KEY, "pipeline"))
+
+    pipeline_model_type = flavor_config[_PIPELINE_MODEL_TYPE_KEY]
+
+    config = transformers.AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+    auto_class_ref = None
+    if config.auto_map:
+        # find class_ref from config.auto_map values
+        auto_class_ref = next((x for x in list(config.auto_map.values()) if x.endswith(pipeline_model_type)), None)
+
+    if auto_class_ref:
+        model_instance = transformers.dynamic_module_utils.get_class_from_dynamic_module(
+            auto_class_ref, model_path
+        )
+    else:
+        model_instance = getattr(transformers, pipeline_model_type)
 
     conf = {
         "task": flavor_config[_TASK_KEY],
